@@ -192,7 +192,8 @@ function summaryText() {
 
 function statusOf(p) {
   if (p.id === ME) return '';
-  if (p.paid) return '<span class="paid">✓ Paid</span>';
+  if (p.payDirect) return p.paid ? '<span class="paid">✓ Paid the restaurant</span>' : 'Paying the restaurant directly';
+  if (p.paid) return '<span class="paid">✓ Paid you</span>';
   if (p.done) return 'Done picking — not paid yet';
   if (p.seen) return 'Opened the link, picking…';
   return 'Not opened yet';
@@ -403,10 +404,13 @@ function viewPay() {
         <button class="btn small" data-act="wa" data-id="${p.id}">${b.cloudId ? 'Remind' : 'WhatsApp'}</button>
         <button class="btn small" data-act="sms" data-id="${p.id}" ${person.phone ? '' : 'disabled'}>SMS</button>
         <button class="btn small ${person.paid ? '' : 'primary'}" data-act="paid" data-id="${p.id}">${person.paid ? '<span class="paid">✓ Paid</span>' : 'Mark paid'}</button>
-      </div>`}
+      </div>
+      <label class="row" style="color:var(--text)"><input type="checkbox" data-act="direct" data-id="${p.id}" ${person.payDirect ? 'checked' : ''} style="width:auto"> Pays the restaurant directly</label>`}
     </div>`;
   }).join('');
-  const owed = r.people.filter((p) => p.id !== ME && !b.people.find((x) => x.id === p.id).paid).reduce((a, p) => a + p.total, 0);
+  const pOf = (id) => b.people.find((x) => x.id === id);
+  const owed = r.people.filter((p) => p.id !== ME && !pOf(p.id).paid && !pOf(p.id).payDirect).reduce((a, p) => a + p.total, 0);
+  const direct = r.people.filter((p) => p.id !== ME && pOf(p.id).payDirect).reduce((a, p) => a + p.total, 0);
   return `
     ${r.unclaimed ? `<div class="banner">${money(r.unclaimed)} of items isn't claimed by anyone, so it's not in anyone's total.</div>` : ''}
     <div class="card">
@@ -418,7 +422,9 @@ function viewPay() {
     <div class="card">
       <div class="row between"><span>Items</span><span class="amt">${money(r.itemsTotal)}</span></div>
       <div class="row between"><span>Tips</span><span class="amt">${money(r.tipTotal)}</span></div>
-      <div class="row between" style="margin-top:6px"><strong>Pay the restaurant (incl. tip)</strong><span class="amt total-big">${money(r.grandTotal)}</span></div>
+      ${direct ? `<div class="row between"><span>Whole bill incl. tip</span><span class="amt">${money(r.grandTotal)}</span></div>
+      <div class="row between"><span>Friends paying the restaurant directly</span><span class="amt">−${money(direct)}</span></div>` : ''}
+      <div class="row between" style="margin-top:6px"><strong>You pay the restaurant (incl. tip)</strong><span class="amt total-big">${money(r.grandTotal - direct)}</span></div>
       <div class="row between"><span class="muted">Still owed to you</span><span class="amt">${money(owed)}</span></div>
     </div>
     <div class="btn-row">
@@ -463,7 +469,7 @@ function viewGuest(r) {
   const totals = `<div class="card">
       <div class="row between"><span>Your food</span><span class="amt">${money(mine.subtotal)}</span></div>
       <div class="row between"><span>Tip (${mine.tipPct}%)</span><span class="amt">${money(mine.tip)}</span></div>
-      <div class="row between" style="margin-top:6px"><strong>You owe ${hostPays}</strong><span class="amt total-big">${money(mine.total)}</span></div>
+      <div class="row between" style="margin-top:6px"><strong>${me.payDirect ? "Your total" : `You owe ${hostPays}`}</strong><span class="amt total-big">${money(mine.total)}</span></div>
     </div>`;
   if (!me.done) {
     return `
@@ -475,8 +481,30 @@ function viewGuest(r) {
       <button class="btn primary block" data-act="gdone" ${mine.subtotal ? '' : 'disabled'}>Done — how do I pay?</button>
       ${home}`;
   }
+  const choice = `<div class="card">
+      <strong>How are you paying?</strong>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn ${me.payDirect ? '' : 'primary'}" data-act="gdirect" data-v="0">Pay ${hostPays}</button>
+        <button class="btn ${me.payDirect ? 'primary' : ''}" data-act="gdirect" data-v="1">Pay the restaurant myself</button>
+      </div></div>`;
+  if (me.payDirect) {
+    return `
+    ${totals}
+    ${choice}
+    <div class="card">
+      <strong>Pay the restaurant</strong>
+      <p>Tell the waiter you're paying <strong>${money(mine.total)}</strong> separately. If the card machine asks for a tip, pay <strong>${money(mine.subtotal)}</strong> and add <strong>${money(mine.tip)}</strong> as the tip.</p>
+      <button class="btn block ${me.paid ? '' : 'primary'}" data-act="gpaid">${me.paid ? '<span class="paid">✓ You\'ve paid the restaurant</span> — tap to undo' : "I've paid the restaurant"}</button>
+    </div>
+    <details class="card"><summary>What you had</summary>
+      <ul class="list">${mine.lines.map((l) => `<li><span class="grow name">${esc(l.name)}${l.splitWith > 1 ? ` <span class="muted">(÷${l.splitWith})</span>` : ''}</span><span class="amt">${money(l.share)}</span></li>`).join('')}</ul>
+    </details>
+    <button class="btn small block" data-act="gundone">Change my items</button>
+    ${home}`;
+  }
   return `
     ${totals}
+    ${choice}
     <div class="card">
       <strong>Pay ${hostPays}</strong>
       ${bill.payDetails ? `<p class="name">${linkify(bill.payDetails)}</p>` : `<p class="muted">${hostPays} hasn't added payment details — ask them how they'd like to be paid.</p>`}
@@ -689,6 +717,12 @@ document.addEventListener('click', async (e) => {
       b.people.forEach((p) => { p.tipPct = null; });
       sync({ tipPct: b.tipPct, serviceIncluded: b.serviceIncluded });
       break;
+    case 'direct': {
+      const p = b.people.find((x) => x.id === id);
+      p.payDirect = el.checked;
+      sync({ [`people/${id}/payDirect`]: p.payDirect });
+      break;
+    }
     case 'paid': {
       const p = b.people.find((x) => x.id === id);
       p.paid = !p.paid;
@@ -756,6 +790,15 @@ document.addEventListener('click', async (e) => {
       me.done = act === 'gdone';
       syncGuest({ [`people/${r.pid}/done`]: me.done });
       scrollTo(0, 0);
+      break;
+    }
+    case 'gdirect': {
+      const r = route();
+      const me = gb.bill.people.find((p) => p.id === r.pid);
+      const v = el.dataset.v === '1';
+      if (me.payDirect === v) return;
+      me.payDirect = v; me.paid = false;
+      syncGuest({ [`people/${r.pid}/payDirect`]: v, [`people/${r.pid}/paid`]: false });
       break;
     }
     case 'gpaid': {
