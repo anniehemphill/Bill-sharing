@@ -11,7 +11,7 @@ const STEPS = ['items', 'people', 'claim', 'pay'];
 
 const defaults = () => ({
   friends: [],
-  settings: { myName: 'Me', myPhone: '', currency: 'R', countryCode: '27', payDetails: '' },
+  settings: { myName: 'Me', myPhone: '', currency: 'R', countryCode: '27' },
   bill: null,
   history: [],
   joined: [], // bills friends invited me to: {cloudId, pid, place, host, created}
@@ -34,7 +34,6 @@ let gb = null;         // guest view: {id, bill} | {id, missing: true}
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const linkify = (s) => esc(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 const route = () => {
   const h = new URLSearchParams(location.hash.slice(1));
   return h.get('b') ? { id: h.get('b'), pid: h.get('p') } : null;
@@ -149,7 +148,7 @@ function newBill() {
     created: Date.now(),
     place: '',
     items: [],
-    people: [{ id: ME, name: s.myName || 'Me', phone: s.myPhone, tipPct: null, paid: true }],
+    people: [{ id: ME, name: s.myName || 'Me', phone: s.myPhone, tipPct: null, paid: false }],
     tipPct: TIP,
     serviceIncluded: false,
     detectedTotal: null,
@@ -165,22 +164,21 @@ const groupLink = () => `${appBase()}#b=${state.bill.cloudId}`;
 function inviteText(p) {
   const b = state.bill;
   return `Hi ${p.name}! ${state.settings.myName} has split the bill${b.place ? ` at ${b.place}` : ''}. ` +
-    `Tap the link, tick what you had and you'll see what you owe (incl. ${b.tipPct}% tip):\n${inviteLink(p.id)}`;
+    `Tap the link and tick what you had. It'll show what to pay the waiter for your share (incl. ${b.tipPct}% tip):\n${inviteLink(p.id)}`;
 }
 
 function groupText() {
   const b = state.bill;
   return `${state.settings.myName} has split the bill${b.place ? ` at ${b.place}` : ''}. ` +
-    `Tap the link, pick your name, tick what you had and you'll see what you owe:\n${groupLink()}`;
+    `Tap the link, pick your name and tick what you had. It'll show what to pay the waiter for your share:\n${groupLink()}`;
 }
 
 function requestText(id) {
   const b = state.bill;
   const p = computeSplit(b).people.find((x) => x.id === id);
   const lines = p.lines.map((l) => `• ${l.name}${l.splitWith > 1 ? ` (shared ÷${l.splitWith})` : ''}: ${money(l.share)}`).join('\n');
-  const pay = state.settings.payDetails ? `\n\nPay to: ${state.settings.payDetails}` : '';
-  const link = b.cloudId ? `\n\nSee it / mark as paid: ${inviteLink(id)}` : '';
-  return `Hi ${p.name}, here's your share${b.place ? ` from ${b.place}` : ''}:\n${lines}\nFood: ${money(p.subtotal)}\nTip (${p.tipPct}%): ${money(p.tip)}\nTotal: ${money(p.total)}${pay}${link}\n\nThanks! — ${state.settings.myName}`;
+  const link = b.cloudId ? `\n\nOpen your share: ${inviteLink(id)}` : '';
+  return `Hi ${p.name}, here's your share${b.place ? ` at ${b.place}` : ''}:\n${lines}\nFood: ${money(p.subtotal)}\nTip (${p.tipPct}%): ${money(p.tip)}\nPay the waiter: ${money(p.total)}${link}`;
 }
 
 function summaryText() {
@@ -192,10 +190,9 @@ function summaryText() {
 }
 
 function statusOf(p) {
-  if (p.id === ME) return '';
-  if (p.payDirect) return p.paid ? '<span class="paid">✓ Paid the restaurant</span>' : 'Paying the restaurant directly';
-  if (p.paid) return '<span class="paid">✓ Paid you</span>';
-  if (p.done) return 'Done picking — not paid yet';
+  if (p.paid) return '<span class="paid">✓ Paid</span>';
+  if (p.id === ME) return 'Not paid yet';
+  if (p.done) return 'Ready to pay';
   if (p.seen) return 'Opened the link, picking…';
   return 'Not opened yet';
 }
@@ -254,7 +251,7 @@ function viewStart() {
   return `
     <div class="card">
       <h2>Split a bill</h2>
-      <p class="muted">Scan the bill and add who's at the table. Everyone gets a link by WhatsApp or SMS, ticks what they had on their own phone, and sees what they owe including a ${TIP}% tip.</p>
+      <p class="muted">Scan the bill and add who's at the table. Everyone gets a link by WhatsApp or SMS, ticks what they had on their own phone, and sees exactly what to pay the waiter, including a ${TIP}% tip.</p>
       <button class="btn primary block" data-act="new">Start a new bill</button>
     </div>
     ${joined ? `<h3>Bills you were invited to</h3><div class="card"><ul class="list">${joined}</ul></div>` : ''}
@@ -359,7 +356,7 @@ function viewInvites() {
   return `
     <div class="card">
       <strong>Send everyone their link</strong>
-      <p class="muted">Each person gets their own link. They open it on their phone, tick what they had and see what they owe. This screen updates as they go.</p>
+      <p class="muted">Each person gets their own link. They open it on their phone, tick what they had and see what to pay the waiter. This screen updates as they go.</p>
       <ul class="list">${rows}</ul>
       <button class="btn block" data-act="inv-group">Or send one link to a group chat</button>
     </div>`;
@@ -382,7 +379,7 @@ function viewClaim() {
       <button class="btn small" style="margin-top:6px" data-act="share-rest">Split unclaimed equally between everyone</button></div>` : ''}
     <div class="card"><ul class="list">${claimList(b, claimer, 'claim')}</ul></div>
     <div class="card row between"><span><strong>${esc(mine?.name)}</strong> so far</span><span class="amt total-big">${money(mine?.subtotal || 0)}</span></div>
-    <button class="btn primary block" data-act="step" data-step="pay">Next: who owes what →</button>`;
+    <button class="btn primary block" data-act="step" data-step="pay">Next: what everyone pays →</button>`;
 }
 
 function viewPay() {
@@ -396,39 +393,38 @@ function viewPay() {
       <div class="row between">
         <div><strong>${esc(p.name)}</strong>${isMe ? ' <span class="muted">(you)</span>' : ''}<br>
           <span class="muted">Food ${money(p.subtotal)} + tip ${money(p.tip)} (${p.tipPct}%)</span>
-          ${b.cloudId && !isMe ? `<br><span class="muted">${statusOf(person)}</span>` : ''}</div>
+          <br><span class="muted">${statusOf(person)}</span></div>
         <span class="amt total-big">${money(p.total)}</span>
       </div>
       <details ${open ? 'open' : ''} data-person="${p.id}"><summary>Breakdown</summary>
         <ul class="list">${p.lines.map((l) => `<li><span class="grow name">${esc(l.name)}${l.splitWith > 1 ? ` <span class="muted">(÷${l.splitWith})</span>` : ''}</span><span class="amt">${money(l.share)}</span></li>`).join('') || '<li class="muted">Nothing claimed</li>'}</ul>
       </details>
-      ${isMe ? '' : `<div class="btn-row" style="margin-top:10px">
-        <button class="btn small" data-act="wa" data-id="${p.id}">${b.cloudId ? 'Remind' : 'WhatsApp'}</button>
-        <button class="btn small" data-act="sms" data-id="${p.id}" ${person.phone ? '' : 'disabled'}>SMS</button>
+      <div class="btn-row" style="margin-top:10px">
+        ${isMe ? '' : `<button class="btn small" data-act="wa" data-id="${p.id}">WhatsApp</button>
+        <button class="btn small" data-act="sms" data-id="${p.id}" ${person.phone ? '' : 'disabled'}>SMS</button>`}
         <button class="btn small ${person.paid ? '' : 'primary'}" data-act="paid" data-id="${p.id}">${person.paid ? '<span class="paid">✓ Paid</span>' : 'Mark paid'}</button>
       </div>
-      <label class="row" style="color:var(--text)"><input type="checkbox" data-act="direct" data-id="${p.id}" ${person.payDirect ? 'checked' : ''} style="width:auto"> Pays the restaurant directly</label>`}
     </div>`;
   }).join('');
   const pOf = (id) => b.people.find((x) => x.id === id);
-  const owed = r.people.filter((p) => p.id !== ME && !pOf(p.id).paid && !pOf(p.id).payDirect).reduce((a, p) => a + p.total, 0);
-  const direct = r.people.filter((p) => p.id !== ME && pOf(p.id).payDirect).reduce((a, p) => a + p.total, 0);
+  const toPay = r.people.filter((p) => !pOf(p.id).paid).reduce((a, p) => a + p.total, 0);
+  const waiter = r.people.map((p) => `<li><span class="grow name">${esc(p.name)}${pOf(p.id).paid ? ' <span class="paid">✓</span>' : ''}</span><span class="amt total-big">${money(p.total)}</span></li>`).join('');
   return `
-    ${r.unclaimed ? `<div class="banner">${money(r.unclaimed)} of items isn't claimed by anyone, so it's not in anyone's total.</div>` : ''}
+    ${r.unclaimed ? `<div class="banner">${money(r.unclaimed)} of items isn't ticked by anyone, so nobody is paying for it yet. Go back to step 3.</div>` : ''}
+    <div class="card">
+      <strong>Show the waiter</strong>
+      <p class="muted">Each person pays the restaurant this amount (includes ${b.tipPct}% tip).</p>
+      <ul class="list">${waiter}</ul>
+      <div class="row between" style="border-top:1px solid var(--line);padding-top:10px"><span>Whole bill incl. tips</span><span class="amt">${money(r.grandTotal)}</span></div>
+      <div class="row between"><span class="muted">Still to pay</span><span class="amt">${money(toPay + r.unclaimed)}</span></div>
+    </div>
     <div class="card">
       <strong>Tip: ${b.serviceIncluded ? '0% (service charge already on the bill)' : `${TIP}%`}</strong>
       <label class="row" style="color:var(--text)"><input type="checkbox" data-act="service" ${b.serviceIncluded ? 'checked' : ''} style="width:auto"> Service charge is already on the bill</label>
       <p class="muted">Each person tips ${TIP}% on what they ordered. Tick the box if the restaurant already added a service charge, so nobody tips twice.</p>
     </div>
+    <h3>Each person</h3>
     ${cards}
-    <div class="card">
-      <div class="row between"><span>Items</span><span class="amt">${money(r.itemsTotal)}</span></div>
-      <div class="row between"><span>Tips</span><span class="amt">${money(r.tipTotal)}</span></div>
-      ${direct ? `<div class="row between"><span>Whole bill incl. tip</span><span class="amt">${money(r.grandTotal)}</span></div>
-      <div class="row between"><span>Friends paying the restaurant directly</span><span class="amt">−${money(direct)}</span></div>` : ''}
-      <div class="row between" style="margin-top:6px"><strong>You pay the restaurant (incl. tip)</strong><span class="amt total-big">${money(r.grandTotal - direct)}</span></div>
-      <div class="row between"><span class="muted">Still owed to you</span><span class="amt">${money(owed)}</span></div>
-    </div>
     <div class="btn-row">
       <button class="btn" data-act="copy">Copy summary</button>
       <button class="btn primary" data-act="finish">Finish &amp; save</button>
@@ -467,54 +463,27 @@ function viewGuest(r) {
   }
   const res = computeSplit(bill);
   const mine = res.people.find((p) => p.id === me.id);
-  const hostPays = esc(bill.host);
   const totals = `<div class="card">
       <div class="row between"><span>Your food</span><span class="amt">${money(mine.subtotal)}</span></div>
       <div class="row between"><span>Tip (${mine.tipPct}%)</span><span class="amt">${money(mine.tip)}</span></div>
-      <div class="row between" style="margin-top:6px"><strong>${me.payDirect ? "Your total" : `You owe ${hostPays}`}</strong><span class="amt total-big">${money(mine.total)}</span></div>
+      <div class="row between" style="margin-top:6px"><strong>Your share</strong><span class="amt total-big">${money(mine.total)}</span></div>
     </div>`;
   if (!me.done) {
     return `
       <div class="card"><strong>Hi ${esc(me.name)} 👋</strong>
-        <p class="muted">${hostPays} paid the bill${bill.place ? ` at ${esc(bill.place)}` : ''}. Tap everything you had. If you shared something, tap it too — it's split between everyone who taps it.</p></div>
+        <p class="muted">${esc(bill.host)} is splitting the bill${bill.place ? ` at ${esc(bill.place)}` : ''}. Tap everything you had. If you shared something, tap it too — it's split between everyone who taps it.</p></div>
       ${res.unclaimed ? `<div class="banner">${res.unclaimedItems.length} item(s) nobody has ticked yet.</div>` : ''}
       <div class="card"><ul class="list">${claimList(bill, me.id, 'gclaim')}</ul></div>
       ${totals}
-      <button class="btn primary block" data-act="gdone" ${mine.subtotal ? '' : 'disabled'}>Done — how do I pay?</button>
+      <button class="btn primary block" data-act="gdone" ${mine.subtotal ? '' : 'disabled'}>Done — what do I pay?</button>
       ${home}`;
-  }
-  const choice = `<div class="card">
-      <strong>How are you paying?</strong>
-      <div class="btn-row" style="margin-top:8px">
-        <button class="btn ${me.payDirect ? '' : 'primary'}" data-act="gdirect" data-v="0">Pay ${hostPays}</button>
-        <button class="btn ${me.payDirect ? 'primary' : ''}" data-act="gdirect" data-v="1">Pay the restaurant myself</button>
-      </div></div>`;
-  if (me.payDirect) {
-    return `
-    ${totals}
-    ${choice}
-    <div class="card">
-      <strong>Pay the restaurant</strong>
-      <p>Tell the waiter you're paying <strong>${money(mine.total)}</strong> separately. If the card machine asks for a tip, pay <strong>${money(mine.subtotal)}</strong> and add <strong>${money(mine.tip)}</strong> as the tip.</p>
-      <button class="btn block ${me.paid ? '' : 'primary'}" data-act="gpaid">${me.paid ? '<span class="paid">✓ You\'ve paid the restaurant</span> — tap to undo' : "I've paid the restaurant"}</button>
-    </div>
-    <details class="card"><summary>What you had</summary>
-      <ul class="list">${mine.lines.map((l) => `<li><span class="grow name">${esc(l.name)}${l.splitWith > 1 ? ` <span class="muted">(÷${l.splitWith})</span>` : ''}</span><span class="amt">${money(l.share)}</span></li>`).join('')}</ul>
-    </details>
-    <button class="btn small block" data-act="gundone">Change my items</button>
-    ${home}`;
   }
   return `
     ${totals}
-    ${choice}
     <div class="card">
-      <strong>Pay ${hostPays}</strong>
-      ${bill.payDetails ? `<p class="name">${linkify(bill.payDetails)}</p>` : `<p class="muted">${hostPays} hasn't added payment details — ask them how they'd like to be paid.</p>`}
-      <div class="btn-row">
-        <button class="btn" data-act="gcopy" data-amt="${cents2str(mine.total)}">Copy amount</button>
-        ${bill.payDetails ? '<button class="btn" data-act="gcopy-details">Copy details</button>' : ''}
-      </div>
-      <button class="btn block ${me.paid ? '' : 'primary'}" data-act="gpaid">${me.paid ? '<span class="paid">✓ You said you\'ve paid</span> — tap to undo' : "I've paid"}</button>
+      <strong>Pay the restaurant</strong>
+      <p>Tell the waiter you're paying <strong>${money(mine.total)}</strong> for your share. If the card machine asks for a tip, put through <strong>${money(mine.subtotal)}</strong> and add <strong>${money(mine.tip)}</strong> as the tip.</p>
+      <button class="btn block ${me.paid ? '' : 'primary'}" data-act="gpaid">${me.paid ? '<span class="paid">✓ You\'ve paid</span> — tap to undo' : "I've paid"}</button>
     </div>
     <details class="card"><summary>What you had</summary>
       <ul class="list">${mine.lines.map((l) => `<li><span class="grow name">${esc(l.name)}${l.splitWith > 1 ? ` <span class="muted">(÷${l.splitWith})</span>` : ''}</span><span class="amt">${money(l.share)}</span></li>`).join('')}</ul>
@@ -572,12 +541,10 @@ function viewSettings() {
   return `
     <div class="card">
       <label>Your name (friends see this)</label><input data-set="myName" value="${esc(s.myName)}">
-      <label>How friends should pay you</label>
-      <input data-set="payDetails" placeholder="e.g. FNB 62xxxxxxx, ref: your name — or a payment link" value="${esc(s.payDetails)}">
       <label>Currency symbol</label><input data-set="currency" value="${esc(s.currency)}" style="width:90px">
       <label>Country dialling code (for numbers starting with 0)</label><input data-set="countryCode" inputmode="numeric" value="${esc(s.countryCode)}" style="width:90px">
     </div>
-    <p class="muted">Friends and phone numbers stay on this phone. When you send a bill, its items, first names, your name and payment details go to the online database so friends can open it. Anyone with the link can see and edit that bill.</p>
+    <p class="muted">Friends and phone numbers stay on this phone. When you send a bill, its items, first names and your name go to the online database so friends can open it. Anyone with the link can see and edit that bill.</p>
     <button class="btn danger block" data-act="wipe">Delete all data on this phone</button>`;
 }
 
@@ -744,12 +711,6 @@ document.addEventListener('click', async (e) => {
       b.people.forEach((p) => { p.tipPct = null; });
       sync({ tipPct: b.tipPct, serviceIncluded: b.serviceIncluded });
       break;
-    case 'direct': {
-      const p = b.people.find((x) => x.id === id);
-      p.payDirect = el.checked;
-      sync({ [`people/${id}/payDirect`]: p.payDirect });
-      break;
-    }
     case 'paid': {
       const p = b.people.find((x) => x.id === id);
       p.paid = !p.paid;
@@ -819,15 +780,6 @@ document.addEventListener('click', async (e) => {
       scrollTo(0, 0);
       break;
     }
-    case 'gdirect': {
-      const r = route();
-      const me = gb.bill.people.find((p) => p.id === r.pid);
-      const v = el.dataset.v === '1';
-      if (me.payDirect === v) return;
-      me.payDirect = v; me.paid = false;
-      syncGuest({ [`people/${r.pid}/payDirect`]: v, [`people/${r.pid}/paid`]: false });
-      break;
-    }
     case 'gpaid': {
       const r = route();
       const me = gb.bill.people.find((p) => p.id === r.pid);
@@ -835,12 +787,6 @@ document.addEventListener('click', async (e) => {
       syncGuest({ [`people/${r.pid}/paid`]: me.paid });
       break;
     }
-    case 'gcopy': case 'gcopy-details':
-      try {
-        await navigator.clipboard.writeText(act === 'gcopy' ? el.dataset.amt : gb.bill.payDetails);
-        toast('Copied');
-      } catch { toast("Couldn't copy"); }
-      return;
     default: return;
   }
   save();
@@ -895,7 +841,6 @@ document.addEventListener('change', (e) => {
       b.people.find((p) => p.id === ME).name = state.settings.myName || 'Me';
       sync({ host: state.settings.myName, [`people/${ME}/name`]: state.settings.myName || 'Me' });
     }
-    if (k === 'payDetails') sync({ payDetails: state.settings.payDetails });
     save();
     return;
   }

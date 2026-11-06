@@ -5,8 +5,8 @@ A phone web app (PWA) you add to your iPhone home screen. It opens full-screen l
 ## What it does
 1. **Items**: scan the bill with the camera (on-device text recognition with Tesseract.js) or type items in. Fix any misread lines. It warns you if the items don't add up to the TOTAL on the slip.
 2. **People**: tap saved friends, type someone in, or import them from Contacts. In Contacts, open the person, tap Share Contact, then Save to Files, then use "Import a shared contact card". If Safari's Contact Picker is switched on, "Choose from contacts" also appears.
-3. **Invite**: send each friend their own link by WhatsApp, SMS or any other app, or one link to a group chat. Each friend opens it on their own phone (no install needed), ticks what they had (shared items split equally) and sees what they owe, including a 10% tip.
-4. **Pay**: each friend chooses to pay you or pay the restaurant themselves. If they pay the restaurant, they see the amount and tip to give the waiter, and your "you pay the restaurant" total drops by their share. Friends paying you see your payment details, copy the amount, pay you through their own banking app and tap "I've paid". Your screen updates live: not opened / picking / done / paid. You can send reminders and mark people paid yourself.
+3. **Invite**: send each friend their own link by WhatsApp, SMS or any other app, or one link to a group chat. Each friend opens it on their own phone (no install needed) and ticks what they had. Shared items are split equally.
+4. **Pay**: everyone pays the restaurant for their own share. Each friend sees exactly what to pay the waiter, and how to split it into amount plus tip if the card machine asks. They tap "I've paid". Your Pay screen has a **Show the waiter** list with everyone's amount and updates live: not opened / picking / ready to pay / paid.
 
 Tick "Service charge is already on the bill" to drop the tip to 0%.
 
@@ -20,7 +20,7 @@ Friends' phones need a shared online database. This app uses Google Firebase Rea
 Until `config.js` has a URL, the app works in pass-the-phone mode.
 
 ### What goes online
-- **Stored online:** the restaurant name, items and prices, first names, who ticked what, paid status, your name and your payment details.
+- **Stored online:** the restaurant name, items and prices, first names, who ticked what, paid status and your name.
 - **Stays on your phone:** phone numbers and your friends list.
 - Anyone who has a bill's link can see and edit that bill. Links are long random codes and bills can't be listed.
 - Use **Stop sharing** on the Pay screen to delete a bill's online copy.

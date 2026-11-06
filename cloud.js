@@ -35,14 +35,13 @@ export function toCloud(bill, settings) {
     if (it.claims.length) claims[it.id] = Object.fromEntries(it.claims.map((p) => [p, true]));
   });
   const people = {};
-  bill.people.forEach((p, o) => { people[p.id] = { name: p.name, o, paid: Boolean(p.paid), payDirect: Boolean(p.payDirect), done: false, seen: false }; });
+  bill.people.forEach((p, o) => { people[p.id] = { name: p.name, o, paid: Boolean(p.paid), done: false, seen: false }; });
   return {
     v: 1,
     created: bill.created,
     place: bill.place || '',
     host: settings.myName || 'Your friend',
     currency: settings.currency,
-    payDetails: settings.payDetails || '',
     tipPct: bill.tipPct,
     serviceIncluded: Boolean(bill.serviceIncluded),
     items,
@@ -59,14 +58,13 @@ export function fromCloud(c) {
     place: c.place || '',
     host: c.host,
     currency: c.currency,
-    payDetails: c.payDetails || '',
     tipPct: c.tipPct ?? 0,
     serviceIncluded: Boolean(c.serviceIncluded),
     items: byOrder(c.items).map(([id, it]) => ({
       id, name: it.name, price: it.price, qty: 1, o: it.o, claims: Object.keys((c.claims || {})[id] || {}),
     })),
     people: byOrder(c.people).map(([id, p]) => ({
-      id, name: p.name, o: p.o, paid: Boolean(p.paid), payDirect: Boolean(p.payDirect), done: Boolean(p.done), seen: Boolean(p.seen), tipPct: null,
+      id, name: p.name, o: p.o, paid: Boolean(p.paid), done: Boolean(p.done), seen: Boolean(p.seen), tipPct: null,
     })),
   };
 }
