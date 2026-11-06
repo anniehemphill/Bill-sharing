@@ -189,7 +189,40 @@ function summaryText() {
     `\nTotal incl. tip: ${money(r.grandTotal)}`;
 }
 
-function statusOf(p) {
+// What someone still has to pay. If their share grew after they paid
+// (e.g. unticked items were split later), they owe the difference.
+const owing = (person, total) => (person.paid ? Math.max(0, total - (person.paidAmt ?? total)) : total);
+
+// Toggle paid. Tapping when someone owes extra records the top-up instead of un-paying.
+function togglePaid(person, total) {
+  if (!person.paid || owing(person, total) > 0) { person.paid = true; person.paidAmt = total; }
+  else { person.paid = false; person.paidAmt = null; }
+  return { paid: person.paid, paidAmt: person.paidAmt };
+}
+
+// "Is the whole bill covered?" — shown to the host and every friend.
+function coverageCard(bill, res, { shareBtn = false } = {}) {
+  const pOf = (id) => bill.people.find((x) => x.id === id);
+  const unpaid = res.people.filter((p) => owing(pOf(p.id), p.total) > 0);
+  const paid = res.people.filter((p) => pOf(p.id).paid && owing(pOf(p.id), p.total) === 0);
+  const stillToPay = unpaid.reduce((a, p) => a + owing(pOf(p.id), p.total), 0) + res.unclaimed;
+  const payLine = !unpaid.length && !res.unclaimed
+    ? '<div class="paid">✓ Everyone has paid</div>'
+    : `<div>Paid: ${paid.length} of ${bill.people.length} people · <strong>${money(stillToPay)}</strong> still to pay${unpaid.length ? ` (${esc(unpaid.map((p) => p.name).join(', '))})` : ''}</div>`;
+  if (res.unclaimed) {
+    return `<div class="banner">
+      <strong>Not covered yet: ${money(res.unclaimed)} not ticked by anyone</strong>
+      <div>${esc(res.unclaimedItems.map((i) => i.name).join(', '))}</div>
+      <div style="margin-top:6px">${payLine}</div>
+      ${shareBtn ? '<button class="btn small" style="margin-top:8px" data-act="share-rest">Split unticked items equally between everyone</button>' : ''}
+    </div>`;
+  }
+  return `<div class="banner ok"><strong>✓ Whole bill covered</strong> — every item is ticked by someone.<div style="margin-top:6px">${payLine}</div></div>`;
+}
+
+function statusOf(p, total) {
+  const extra = owing(p, total);
+  if (p.paid && extra > 0) return `<span style="color:var(--warn)">Paid ${money(p.paidAmt)} — owes ${money(extra)} more</span>`;
   if (p.paid) return '<span class="paid">✓ Paid</span>';
   if (p.id === ME) return 'Not paid yet';
   if (p.done) return 'Ready to pay';
@@ -345,9 +378,10 @@ function claimList(bill, pid, act) {
 
 function viewInvites() {
   const b = state.bill;
+  const totals = new Map(computeSplit(b).people.map((x) => [x.id, x.total]));
   const rows = b.people.filter((p) => p.id !== ME).map((p) => `
     <li style="display:block">
-      <div class="row between"><strong class="name">${esc(p.name)}</strong><span class="muted">${statusOf(p)}</span></div>
+      <div class="row between"><strong class="name">${esc(p.name)}</strong><span class="muted">${statusOf(p, totals.get(p.id))}</span></div>
       <div class="btn-row" style="margin-top:8px">
         <button class="btn small" data-act="inv-wa" data-id="${p.id}">WhatsApp</button>
         <button class="btn small" data-act="inv-sms" data-id="${p.id}" ${p.phone ? '' : 'disabled'}>SMS</button>
@@ -375,8 +409,7 @@ function viewClaim() {
     ${shared ? `<h3>Your items</h3><p class="muted">Tick what you had. You can also tick for someone who can't open the link — tap their name first.</p>`
              : '<p class="muted">Each person taps their name, then taps everything they had. Tap one item for several people to share it equally.</p>'}
     <div class="chips">${chips}</div>
-    ${r.unclaimed ? `<div class="banner">${r.unclaimedItems.length} item(s) not claimed yet (${money(r.unclaimed)}).
-      <button class="btn small" style="margin-top:6px" data-act="share-rest">Split unclaimed equally between everyone</button></div>` : ''}
+    ${b.items.length ? coverageCard(b, r, { shareBtn: true }) : ''}
     <div class="card"><ul class="list">${claimList(b, claimer, 'claim')}</ul></div>
     <div class="card row between"><span><strong>${esc(mine?.name)}</strong> so far</span><span class="amt total-big">${money(mine?.subtotal || 0)}</span></div>
     <button class="btn primary block" data-act="step" data-step="pay">Next: what everyone pays →</button>`;
@@ -393,7 +426,7 @@ function viewPay() {
       <div class="row between">
         <div><strong>${esc(p.name)}</strong>${isMe ? ' <span class="muted">(you)</span>' : ''}<br>
           <span class="muted">Food ${money(p.subtotal)} + tip ${money(p.tip)} (${p.tipPct}%)</span>
-          <br><span class="muted">${statusOf(person)}</span></div>
+          <br><span class="muted">${statusOf(person, p.total)}</span></div>
         <span class="amt total-big">${money(p.total)}</span>
       </div>
       <details ${open ? 'open' : ''} data-person="${p.id}"><summary>Breakdown</summary>
@@ -402,15 +435,21 @@ function viewPay() {
       <div class="btn-row" style="margin-top:10px">
         ${isMe ? '' : `<button class="btn small" data-act="wa" data-id="${p.id}">WhatsApp</button>
         <button class="btn small" data-act="sms" data-id="${p.id}" ${person.phone ? '' : 'disabled'}>SMS</button>`}
-        <button class="btn small ${person.paid ? '' : 'primary'}" data-act="paid" data-id="${p.id}">${person.paid ? '<span class="paid">✓ Paid</span>' : 'Mark paid'}</button>
+        ${(() => { const ex = owing(person, p.total); return person.paid && !ex
+          ? `<button class="btn small" data-act="paid" data-id="${p.id}"><span class="paid">✓ Paid</span></button>`
+          : `<button class="btn small primary" data-act="paid" data-id="${p.id}">${person.paid ? `Mark extra ${money(ex)} paid` : 'Mark paid'}</button>`; })()}
       </div>
     </div>`;
   }).join('');
   const pOf = (id) => b.people.find((x) => x.id === id);
-  const toPay = r.people.filter((p) => !pOf(p.id).paid).reduce((a, p) => a + p.total, 0);
-  const waiter = r.people.map((p) => `<li><span class="grow name">${esc(p.name)}${pOf(p.id).paid ? ' <span class="paid">✓</span>' : ''}</span><span class="amt total-big">${money(p.total)}</span></li>`).join('');
+  const toPay = r.people.reduce((a, p) => a + owing(pOf(p.id), p.total), 0);
+  const waiter = r.people.map((p) => {
+    const ex = owing(pOf(p.id), p.total);
+    const tag = pOf(p.id).paid ? (ex ? ` <span class="muted">(paid ${money(pOf(p.id).paidAmt)}, ${money(ex)} more to pay)</span>` : ' <span class="paid">✓</span>') : '';
+    return `<li><span class="grow name">${esc(p.name)}${tag}</span><span class="amt total-big">${money(p.total)}</span></li>`;
+  }).join('');
   return `
-    ${r.unclaimed ? `<div class="banner">${money(r.unclaimed)} of items isn't ticked by anyone, so nobody is paying for it yet. Go back to step 3.</div>` : ''}
+    ${coverageCard(b, r, { shareBtn: true })}
     <div class="card">
       <strong>Show the waiter</strong>
       <p class="muted">Each person pays the restaurant this amount (includes ${b.tipPct}% tip).</p>
@@ -463,6 +502,7 @@ function viewGuest(r) {
   }
   const res = computeSplit(bill);
   const mine = res.people.find((p) => p.id === me.id);
+  const extra = owing(me, mine.total);
   const totals = `<div class="card">
       <div class="row between"><span>Your food</span><span class="amt">${money(mine.subtotal)}</span></div>
       <div class="row between"><span>Tip (${mine.tipPct}%)</span><span class="amt">${money(mine.tip)}</span></div>
@@ -472,7 +512,7 @@ function viewGuest(r) {
     return `
       <div class="card"><strong>Hi ${esc(me.name)} 👋</strong>
         <p class="muted">${esc(bill.host)} is splitting the bill${bill.place ? ` at ${esc(bill.place)}` : ''}. Tap everything you had. If you shared something, tap it too — it's split between everyone who taps it.</p></div>
-      ${res.unclaimed ? `<div class="banner">${res.unclaimedItems.length} item(s) nobody has ticked yet.</div>` : ''}
+      ${coverageCard(bill, res)}
       <div class="card"><ul class="list">${claimList(bill, me.id, 'gclaim')}</ul></div>
       ${totals}
       <button class="btn primary block" data-act="gdone" ${mine.subtotal ? '' : 'disabled'}>Done — what do I pay?</button>
@@ -480,10 +520,14 @@ function viewGuest(r) {
   }
   return `
     ${totals}
+    ${coverageCard(bill, res)}
     <div class="card">
       <strong>Pay the restaurant</strong>
-      <p>Tell the waiter you're paying <strong>${money(mine.total)}</strong> for your share. If the card machine asks for a tip, put through <strong>${money(mine.subtotal)}</strong> and add <strong>${money(mine.tip)}</strong> as the tip.</p>
-      <button class="btn block ${me.paid ? '' : 'primary'}" data-act="gpaid">${me.paid ? '<span class="paid">✓ You\'ve paid</span> — tap to undo' : "I've paid"}</button>
+      ${extra && me.paid
+        ? `<p>You paid <strong>${money(me.paidAmt)}</strong>, but your share has gone up to <strong>${money(mine.total)}</strong> (someone split an item with you). Please pay the waiter <strong>${money(extra)}</strong> more.</p>
+           <button class="btn block primary" data-act="gpaid">I've paid the extra ${money(extra)}</button>`
+        : `<p>Tell the waiter you're paying <strong>${money(mine.total)}</strong> for your share. If the card machine asks for a tip, put through <strong>${money(mine.subtotal)}</strong> and add <strong>${money(mine.tip)}</strong> as the tip.</p>
+           <button class="btn block ${me.paid ? '' : 'primary'}" data-act="gpaid">${me.paid ? '<span class="paid">✓ You\'ve paid</span> — tap to undo' : "I've paid"}</button>`}
     </div>
     <details class="card"><summary>What you had</summary>
       <ul class="list">${mine.lines.map((l) => `<li><span class="grow name">${esc(l.name)}${l.splitWith > 1 ? ` <span class="muted">(÷${l.splitWith})</span>` : ''}</span><span class="amt">${money(l.share)}</span></li>`).join('')}</ul>
@@ -713,8 +757,8 @@ document.addEventListener('click', async (e) => {
       break;
     case 'paid': {
       const p = b.people.find((x) => x.id === id);
-      p.paid = !p.paid;
-      sync({ [`people/${id}/paid`]: p.paid });
+      const v = togglePaid(p, computeSplit(b).people.find((x) => x.id === id).total);
+      sync({ [`people/${id}/paid`]: v.paid, [`people/${id}/paidAmt`]: v.paidAmt });
       break;
     }
     case 'inv-wa': { const p = b.people.find((x) => x.id === id); openWhatsApp(p.phone, inviteText(p)); return; }
@@ -783,8 +827,8 @@ document.addEventListener('click', async (e) => {
     case 'gpaid': {
       const r = route();
       const me = gb.bill.people.find((p) => p.id === r.pid);
-      me.paid = !me.paid;
-      syncGuest({ [`people/${r.pid}/paid`]: me.paid });
+      const v = togglePaid(me, computeSplit(gb.bill).people.find((x) => x.id === me.id).total);
+      syncGuest({ [`people/${r.pid}/paid`]: v.paid, [`people/${r.pid}/paidAmt`]: v.paidAmt });
       break;
     }
     default: return;

@@ -121,3 +121,5 @@ label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px
 .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
 .empty { text-align: center; padding: 30px 10px; color: var(--muted); }
 details summary { cursor: pointer; color: var(--accent); font-size: 14px; }
+.banner.ok { background: var(--accent-soft); color: var(--text); }
+.banner.ok strong { color: var(--ok); }

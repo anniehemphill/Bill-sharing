@@ -8,6 +8,8 @@ A phone web app (PWA) you add to your iPhone home screen. It opens full-screen l
 3. **Invite**: send each friend their own link by WhatsApp, SMS or any other app, or one link to a group chat. Each friend opens it on their own phone (no install needed) and ticks what they had. Shared items are split equally.
 4. **Pay**: everyone pays the restaurant for their own share. Each friend sees exactly what to pay the waiter, and how to split it into amount plus tip if the card machine asks. They tap "I've paid". Your Pay screen has a **Show the waiter** list with everyone's amount and updates live: not opened / picking / ready to pay / paid.
 
+**Bill covered?** Everyone, host and friends, sees a card showing whether every item has been ticked (and which haven't), who has paid and how much is still outstanding. If someone's share goes up after they've paid, for example when unticked items are split, they're told to pay the difference and it shows as outstanding until they do.
+
 Tick "Service charge is already on the bill" to drop the tip to 0%.
 
 ## Turn on sharing (one-off, about 10 minutes)
