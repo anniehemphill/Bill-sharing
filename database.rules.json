@@ -1,0 +1,13 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "bills": {
+      "$bill": {
+        ".read": "$bill.length >= 24",
+        ".write": "$bill.length >= 24",
+        ".validate": "newData.hasChild('people')"
+      }
+    }
+  }
+}
