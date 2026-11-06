@@ -6,7 +6,7 @@ A phone web app (PWA) you add to your iPhone home screen. It opens full-screen l
 1. **Items**: scan the bill with the camera (on-device text recognition with Tesseract.js) or type items in. Fix any misread lines. It warns you if the items don't add up to the TOTAL on the slip. "2× Castle Lite" lines can be split into single items.
 2. **People**: tap saved friends (name and mobile number) or add someone new.
 3. **Who had what**: pass the phone round. Each person taps their name, then their items. A shared item is split equally between everyone who taps it.
-4. **Tip & pay**: choose a bill-wide tip % (each person tips on their own food). You can change the tip for one person. Send each person their breakdown by WhatsApp or SMS, with your payment details added, then mark them paid.
+4. **Tip & pay**: everyone tips a fixed 10% on their own food. Tick "service charge already on the bill" to drop the tip to 0%. Send each person their breakdown by WhatsApp or SMS, with your payment details added, then mark them paid.
 
 All data stays on the phone (localStorage). Nothing is sent anywhere unless you tap WhatsApp or SMS.
 

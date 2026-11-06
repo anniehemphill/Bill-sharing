@@ -4,10 +4,11 @@ import { computeSplit, fmt, toCents, parseReceipt, splitUnits } from './split.js
 const KEY = 'splitit:v1';
 const uid = () => Math.random().toString(36).slice(2, 10);
 const ME = 'me';
+const TIP = 10; // fixed tip %
 
 const defaults = () => ({
   friends: [],
-  settings: { myName: 'Me', myPhone: '', currency: 'R', countryCode: '27', defaultTip: 10, payDetails: '' },
+  settings: { myName: 'Me', myPhone: '', currency: 'R', countryCode: '27', payDetails: '' },
   bill: null,
   history: [],
 });
@@ -58,7 +59,8 @@ function newBill() {
     place: '',
     items: [],
     people: [{ id: ME, name: s.myName || 'Me', phone: s.myPhone, tipPct: null, paid: true }],
-    tipPct: Number(s.defaultTip) || 0,
+    tipPct: TIP,
+    serviceIncluded: false,
     detectedTotal: null,
     step: 'items',
   };
@@ -204,24 +206,18 @@ function viewClaim() {
 function viewPay() {
   const b = state.bill;
   const r = computeSplit(b);
-  const tips = [0, 10, 12.5, 15, 20];
-  const custom = !tips.includes(b.tipPct);
   const cards = r.people.map((p) => {
     const person = b.people.find((x) => x.id === p.id);
     const isMe = p.id === ME;
     const open = openPerson === p.id;
-    const overrideOpts = ['', ...tips].map((t) =>
-      `<option value="${t}" ${String(person.tipPct ?? '') === String(t) ? 'selected' : ''}>${t === '' ? `Bill tip (${b.tipPct}%)` : `${t}%`}</option>`).join('');
     return `<div class="card">
       <div class="row between">
         <div><strong>${esc(p.name)}</strong>${isMe ? ' <span class="muted">(you)</span>' : ''}<br>
           <span class="muted">Food ${money(p.subtotal)} + tip ${money(p.tip)} (${p.tipPct}%)</span></div>
         <span class="amt total-big">${money(p.total)}</span>
       </div>
-      <details ${open ? 'open' : ''} data-person="${p.id}"><summary>Breakdown &amp; tip</summary>
+      <details ${open ? 'open' : ''} data-person="${p.id}"><summary>Breakdown</summary>
         <ul class="list">${p.lines.map((l) => `<li><span class="grow name">${esc(l.name)}${l.splitWith > 1 ? ` <span class="muted">(÷${l.splitWith})</span>` : ''}</span><span class="amt">${money(l.share)}</span></li>`).join('') || '<li class="muted">Nothing claimed</li>'}</ul>
-        <label>Tip for ${esc(p.name)}</label>
-        <select data-edit="ptip" data-id="${p.id}">${overrideOpts}</select>
       </details>
       ${isMe ? '' : `<div class="btn-row" style="margin-top:10px">
         <button class="btn small" data-act="wa" data-id="${p.id}" ${person.phone ? '' : 'disabled'}>WhatsApp</button>
@@ -234,12 +230,9 @@ function viewPay() {
   return `
     ${r.unclaimed ? `<div class="banner">${money(r.unclaimed)} of items isn't claimed by anyone, so it's not in anyone's total. Go back to step 3 to sort it.</div>` : ''}
     <div class="card">
-      <strong>Tip</strong>
-      <div class="chips" style="flex-wrap:wrap">
-        ${tips.map((t) => `<button class="chip ${b.tipPct === t ? 'on' : ''}" data-act="tip" data-tip="${t}">${t}%</button>`).join('')}
-        <input style="width:90px" inputmode="decimal" data-edit="tip" placeholder="Other %" value="${custom ? b.tipPct : ''}" aria-label="Custom tip percent">
-      </div>
-      <p class="muted">Each person tips on what they ordered. Change one person's tip under their breakdown. If the bill already includes a service charge, choose 0%.</p>
+      <div class="row between"><strong>Tip: ${b.serviceIncluded ? '0% (service charge already on the bill)' : `${TIP}%`}</strong></div>
+      <label class="row" style="color:var(--text)"><input type="checkbox" data-act="service" ${b.serviceIncluded ? 'checked' : ''} style="width:auto"> Service charge is already on the bill</label>
+      <p class="muted">Each person tips ${TIP}% on what they ordered. Tick the box if the restaurant already added a service charge, so nobody tips twice.</p>
     </div>
     ${cards}
     <div class="card">
@@ -279,7 +272,6 @@ function viewSettings() {
       <label>Your name</label><input data-set="myName" value="${esc(s.myName)}">
       <label>Currency symbol</label><input data-set="currency" value="${esc(s.currency)}" style="width:90px">
       <label>Country dialling code (for numbers starting with 0)</label><input data-set="countryCode" inputmode="numeric" value="${esc(s.countryCode)}" style="width:90px">
-      <label>Default tip %</label><input data-set="defaultTip" inputmode="decimal" value="${esc(s.defaultTip)}" style="width:90px">
       <label>How friends should pay you (added to every request)</label>
       <input data-set="payDetails" placeholder="e.g. FNB 62xxxxxxx, ref: your name — or a SnapScan / payment link" value="${esc(s.payDetails)}">
     </div>
@@ -415,7 +407,7 @@ document.addEventListener('click', async (e) => {
       b.items.forEach((it) => { if (!it.claims.length) it.claims = [...all]; });
       break;
     }
-    case 'tip': b.tipPct = Number(el.dataset.tip); break;
+    case 'service': b.serviceIncluded = el.checked; b.tipPct = b.serviceIncluded ? 0 : TIP; b.people.forEach((p) => { p.tipPct = null; }); break;
     case 'paid': { const p = b.people.find((x) => x.id === id); p.paid = !p.paid; break; }
     case 'wa': {
       const p = b.people.find((x) => x.id === id);
@@ -498,7 +490,7 @@ document.addEventListener('change', (e) => {
   const b = state.bill;
   if (el.dataset.set) {
     const k = el.dataset.set;
-    state.settings[k] = k === 'defaultTip' ? Number(el.value) || 0 : el.value.trim();
+    state.settings[k] = el.value.trim();
     if (k === 'myName' && b) b.people.find((p) => p.id === ME).name = state.settings.myName || 'Me';
     save();
     return;
@@ -510,13 +502,6 @@ document.addEventListener('change', (e) => {
     const it = b.items.find((i) => i.id === el.dataset.id);
     if (kind === 'name') it.name = el.value.trim() || it.name;
     else it.price = toCents(el.value);
-  } else if (kind === 'tip') {
-    const v = parseFloat(el.value.replace(',', '.'));
-    if (Number.isFinite(v) && v >= 0) b.tipPct = v;
-  } else if (kind === 'ptip') {
-    const p = b.people.find((x) => x.id === el.dataset.id);
-    p.tipPct = el.value === '' ? null : Number(el.value);
-    openPerson = p.id;
   }
   save();
   render();
