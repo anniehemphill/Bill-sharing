@@ -1,6 +1,6 @@
 // Offline cache for the app shell. Bump VERSION when files change.
-const VERSION = 'splitit-v3';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'split.js', 'cloud.js', 'config.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
+const VERSION = 'splitit-v4';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'split.js', 'cloud.js', 'config.js', 'contacts.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

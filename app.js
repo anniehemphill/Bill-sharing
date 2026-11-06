@@ -1,4 +1,5 @@
 import { computeSplit, fmt, toCents, parseReceipt, splitUnits } from './split.js';
+import { parseVCards } from './contacts.js';
 import { cloudEnabled, cget, cput, cpatch, newCloudId, toCloud, fromCloud } from './cloud.js';
 
 // ---------- state ----------
@@ -319,6 +320,7 @@ function viewPeople() {
       <strong>Tap friends to add them</strong>
       ${chips ? `<div class="chips" style="flex-wrap:wrap">${chips}</div>` : '<p class="muted">No saved friends yet. Add someone below — tick “save” to keep them for next time.</p>'}
     </div>
+    <div class="card"><strong>Add from your contacts</strong>${contactButtons('bill')}</div>
     <div class="card">
       <strong>Add someone new</strong>
       <form id="add-guest">
@@ -522,8 +524,33 @@ function viewGuest(r) {
 }
 
 // ---------- friends & settings ----------
+const hasPicker = () => 'contacts' in navigator && 'select' in navigator.contacts;
+function contactButtons(where) {
+  return `${hasPicker() ? `<button class="btn block" data-act="pick-contact" data-where="${where}">📇 Choose from contacts</button>` : ''}
+    <label class="btn block" style="margin-top:10px;text-align:center;color:var(--text)">📇 Import a shared contact card
+      <input type="file" accept=".vcf,text/vcard,text/x-vcard" multiple hidden data-vcf="${where}"></label>
+    <details style="margin-top:8px"><summary>How do I get a contact card?</summary>
+      <p class="muted">In the Contacts app, open the person, tap <strong>Share Contact</strong>, then <strong>Save to Files</strong>. Come back here, tap “Import a shared contact card” and pick it. You can pick several at once.</p></details>`;
+}
+
+function addContacts(list, where) {
+  let added = 0;
+  for (const c of list) {
+    const phone = String(c.phone || '').trim();
+    const digits = phone.replace(/\D/g, '').slice(-9);
+    let f = state.friends.find((x) => (digits && x.phone.replace(/\D/g, '').slice(-9) === digits) || x.name === c.name);
+    if (!f) { f = { id: uid(), name: c.name, phone }; state.friends.push(f); added++; }
+    if (where === 'bill' && state.bill && !state.bill.people.some((p) => p.friendId === f.id)) {
+      addPerson({ id: uid(), friendId: f.id, name: f.name, phone: f.phone, tipPct: null, paid: false });
+    }
+  }
+  save();
+  render();
+  toast(list.length ? `${list.length} contact${list.length > 1 ? 's' : ''} added` : 'No contacts found in that file');
+  return added;
+}
+
 function viewFriends() {
-  const supportsPicker = 'contacts' in navigator && 'select' in navigator.contacts;
   const rows = state.friends.map((f) => `
     <li><div class="grow"><div class="name">${esc(f.name)}</div><div class="muted">${esc(f.phone || 'No number')}</div></div>
       <button class="btn small danger" data-act="del-friend" data-id="${f.id}" aria-label="Delete">✕</button></li>`).join('');
@@ -535,8 +562,8 @@ function viewFriends() {
         <label>Mobile number</label><input name="phone" type="tel" placeholder="082 123 4567" autocomplete="off">
         <button class="btn primary block">Save friend</button>
       </form>
-      ${supportsPicker ? '<button class="btn block" data-act="pick-contact">Choose from contacts</button>' : ''}
     </div>
+    <div class="card"><strong>Or add from your contacts</strong>${contactButtons('friends')}</div>
     <div class="card">${rows ? `<ul class="list">${rows}</ul>` : '<p class="empty">No friends saved yet.</p>'}</div>`;
 }
 
@@ -759,9 +786,9 @@ document.addEventListener('click', async (e) => {
     case 'pick-contact': {
       try {
         const picked = await navigator.contacts.select(['name', 'tel'], { multiple: true });
-        picked.forEach((c) => state.friends.push({ id: uid(), name: c.name?.[0] || 'Friend', phone: c.tel?.[0] || '' }));
-      } catch { return; }
-      break;
+        addContacts(picked.map((c) => ({ name: c.name?.[0] || 'Friend', phone: c.tel?.[0] || '' })), el.dataset.where);
+      } catch {}
+      return;
     }
     case 'wipe':
       if (!confirm('Delete all friends, bills and settings from this phone?')) return;
@@ -852,6 +879,14 @@ document.addEventListener('submit', (e) => {
 document.addEventListener('change', (e) => {
   const el = e.target;
   if (el.id === 'scan' && el.files?.[0]) { scan(el.files[0]); el.value = ''; return; }
+  if (el.dataset.vcf && el.files?.length) {
+    const where = el.dataset.vcf;
+    Promise.all([...el.files].map((f) => f.text()))
+      .then((texts) => addContacts(texts.flatMap(parseVCards), where))
+      .catch(() => toast("Couldn't read that file"));
+    el.value = '';
+    return;
+  }
   const b = state.bill;
   if (el.dataset.set) {
     const k = el.dataset.set;
