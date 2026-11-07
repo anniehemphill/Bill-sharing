@@ -74,3 +74,12 @@ test('multi-quantity items: each person pays for the units they picked', () => {
   assert.equal(r.overClaimed.length, 1);
   assert.equal(r.people[0].subtotal + r.people[1].subtotal, 9000);
 });
+
+test('per-person tip choice, ignored when service charge is on the bill', () => {
+  const people = [{ id: 'a', name: 'A', tipPct: null }, { id: 'b', name: 'B', tipPct: 20 }];
+  const items = [{ id: 1, name: 'X', price: 10000, claims: ['a'] }, { id: 2, name: 'Y', price: 10000, claims: ['b'] }];
+  let r = computeSplit({ tipPct: 10, people, items });
+  assert.deepEqual(r.people.map((p) => p.tip), [1000, 2000]);
+  r = computeSplit({ tipPct: 10, serviceIncluded: true, people, items });
+  assert.deepEqual(r.people.map((p) => p.tip), [0, 0]);
+});

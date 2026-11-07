@@ -96,7 +96,8 @@ export function computeSplit(bill) {
   }
 
   const result = people.map((p, i) => {
-    const pct = p.tipPct ?? bill.tipPct ?? 0;
+    // A service charge already on the bill means no tip for anyone.
+    const pct = bill.serviceIncluded ? 0 : (p.tipPct ?? bill.tipPct ?? 0);
     const tip = Math.round((sub[i] * pct) / 100);
     return { id: p.id, name: p.name, subtotal: sub[i], tipPct: pct, tip, total: sub[i] + tip, lines: lines[i] };
   });

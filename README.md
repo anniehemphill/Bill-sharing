@@ -10,7 +10,7 @@ A phone web app (PWA) you add to your iPhone home screen. It opens full-screen l
 
 **Bill covered?** Everyone, host and friends, sees a card showing whether every item has been ticked (and which haven't), who has paid and how much is still outstanding. If someone's share goes up after they've paid, for example when unticked items are split, they're told to pay the difference and it shows as outstanding until they do.
 
-Tick "Service charge is already on the bill" to drop the tip to 0%.
+**Tip**: 10% by default. Each person can choose 15% or 20% on their own screen, and the host can change anyone's on the Pay screen. Tick "Service charge is already on the bill" to drop the tip to 0%.
 
 ## Turn on sharing (one-off, about 10 minutes)
 Friends' phones need a shared online database. This app uses Google Firebase Realtime Database on the free plan.

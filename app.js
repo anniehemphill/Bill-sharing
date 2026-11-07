@@ -6,7 +6,8 @@ import { cloudEnabled, cget, cput, cpatch, newCloudId, toCloud, fromCloud } from
 const KEY = 'splitit:v1';
 const uid = () => Math.random().toString(36).slice(2, 10);
 const ME = 'me';
-const TIP = 10; // fixed tip %
+const TIP = 10; // default tip %
+const TIP_OPTIONS = [10, 15, 20];
 const STEPS = ['items', 'people', 'claim', 'pay'];
 
 const defaults = () => ({
@@ -61,6 +62,14 @@ function intlNumber(phone) {
 }
 
 const people = () => state.bill?.people || [];
+
+// 10% / 15% / 20% buttons for one person. Hidden when a service charge is already on the bill.
+function tipChips(bill, person, act) {
+  if (bill.serviceIncluded) return '<p class="muted" style="margin:6px 0 0">No tip: service charge is already on the bill.</p>';
+  const cur = person.tipPct ?? bill.tipPct ?? TIP;
+  return `<div class="row" style="gap:6px;margin-top:8px"><span class="muted" style="font-size:14px">Tip</span>
+    ${TIP_OPTIONS.map((t) => `<button class="chip ${cur === t ? 'on' : ''}" data-act="${act}" data-id="${person.id}" data-v="${t}">${t}%</button>`).join('')}</div>`;
+}
 
 // "Castle Lite ×2", "Nachos (÷3)", "Castle Lite (leftover ÷3)"
 function lineLabel(l, html = true) {
@@ -172,7 +181,7 @@ const groupLink = () => `${appBase()}#b=${state.bill.cloudId}`;
 function inviteText(p) {
   const b = state.bill;
   return `Hi ${p.name}! ${state.settings.myName} has split the bill${b.place ? ` at ${b.place}` : ''}. ` +
-    `Tap the link and tick what you had. It'll show what to pay the waiter for your share (incl. ${b.tipPct}% tip):\n${inviteLink(p.id)}`;
+    `Tap the link and tick what you had. It'll show what to pay the waiter for your share (incl. a 10% tip, or 15% / 20% if you'd like to tip more):\n${inviteLink(p.id)}`;
 }
 
 function groupText() {
@@ -472,6 +481,7 @@ function viewPay() {
           <br><span class="muted">${statusOf(person, p.total)}</span></div>
         <span class="amt total-big">${money(p.total)}</span>
       </div>
+      ${tipChips(b, person, 'ptip')}
       <details ${open ? 'open' : ''} data-person="${p.id}"><summary>Breakdown</summary>
         <ul class="list">${p.lines.map((l) => `<li><span class="grow name">${lineLabel(l)}</span><span class="amt">${money(l.share)}</span></li>`).join('') || '<li class="muted">Nothing claimed</li>'}</ul>
       </details>
@@ -495,15 +505,15 @@ function viewPay() {
     ${coverageCard(b, r, { shareBtn: true })}
     <div class="card">
       <strong>Show the waiter</strong>
-      <p class="muted">Each person pays the restaurant this amount (includes ${b.tipPct}% tip).</p>
+      <p class="muted">Each person pays the restaurant this amount (includes each person's tip).</p>
       <ul class="list">${waiter}</ul>
       <div class="row between" style="border-top:1px solid var(--line);padding-top:10px"><span>Whole bill incl. tips</span><span class="amt">${money(r.grandTotal)}</span></div>
       <div class="row between"><span class="muted">Still to pay</span><span class="amt">${money(toPay + r.unclaimed)}</span></div>
     </div>
     <div class="card">
-      <strong>Tip: ${b.serviceIncluded ? '0% (service charge already on the bill)' : `${TIP}%`}</strong>
+      <strong>Tip: ${b.serviceIncluded ? '0% (service charge already on the bill)' : `${TIP}% unless someone picks more`}</strong>
       <label class="row" style="color:var(--text)"><input type="checkbox" data-act="service" ${b.serviceIncluded ? 'checked' : ''} style="width:auto"> Service charge is already on the bill</label>
-      <p class="muted">Each person tips ${TIP}% on what they ordered. Tick the box if the restaurant already added a service charge, so nobody tips twice.</p>
+      <p class="muted">Each person tips on what they ordered: ${TIP}% unless they choose 15% or 20% on their phone (or you change it below). Tick the box if the restaurant already added a service charge, so nobody tips twice.</p>
     </div>
     <h3>Each person</h3>
     ${cards}
@@ -550,6 +560,7 @@ function viewGuest(r) {
       <div class="row between"><span>Your food</span><span class="amt">${money(mine.subtotal)}</span></div>
       <div class="row between"><span>Tip (${mine.tipPct}%)</span><span class="amt">${money(mine.tip)}</span></div>
       <div class="row between" style="margin-top:6px"><strong>Your share</strong><span class="amt total-big">${money(mine.total)}</span></div>
+      ${tipChips(bill, me, 'gtip')}
     </div>`;
   if (!me.done) {
     return `
@@ -799,10 +810,15 @@ document.addEventListener('click', async (e) => {
     }
     case 'service':
       b.serviceIncluded = el.checked;
-      b.tipPct = b.serviceIncluded ? 0 : TIP;
-      b.people.forEach((p) => { p.tipPct = null; });
+      b.tipPct = TIP;
       sync({ tipPct: b.tipPct, serviceIncluded: b.serviceIncluded });
       break;
+    case 'ptip': {
+      const p = b.people.find((x) => x.id === id);
+      p.tipPct = Number(el.dataset.v);
+      sync({ [`people/${id}/tipPct`]: p.tipPct });
+      break;
+    }
     case 'paid': {
       const p = b.people.find((x) => x.id === id);
       const v = togglePaid(p, computeSplit(b).people.find((x) => x.id === id).total);
@@ -854,6 +870,13 @@ document.addEventListener('click', async (e) => {
       const r = route();
       history.replaceState(null, '', `#b=${r.id}&p=${id}`);
       guestLoaded(route());
+      break;
+    }
+    case 'gtip': {
+      const r = route();
+      const me = gb.bill.people.find((p) => p.id === r.pid);
+      me.tipPct = Number(el.dataset.v);
+      syncGuest({ [`people/${r.pid}/tipPct`]: me.tipPct });
       break;
     }
     case 'gclaim-u': {

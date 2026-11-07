@@ -1,5 +1,5 @@
 // Offline cache for the app shell. Bump VERSION when files change.
-const VERSION = 'splitit-v7';
+const VERSION = 'splitit-v8';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'split.js', 'cloud.js', 'config.js', 'contacts.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

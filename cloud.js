@@ -38,7 +38,7 @@ export function toCloud(bill, settings) {
     } else if (it.claims.length) claims[it.id] = Object.fromEntries(it.claims.map((p) => [p, true]));
   });
   const people = {};
-  bill.people.forEach((p, o) => { people[p.id] = { name: p.name, o, paid: Boolean(p.paid), paidAmt: p.paidAmt ?? null, done: false, seen: false }; });
+  bill.people.forEach((p, o) => { people[p.id] = { name: p.name, o, paid: Boolean(p.paid), paidAmt: p.paidAmt ?? null, tipPct: p.tipPct ?? null, done: false, seen: false }; });
   return {
     v: 1,
     created: bill.created,
@@ -73,7 +73,7 @@ export function fromCloud(c) {
       };
     }),
     people: byOrder(c.people).map(([id, p]) => ({
-      id, name: p.name, o: p.o, paid: Boolean(p.paid), paidAmt: p.paidAmt ?? null, done: Boolean(p.done), seen: Boolean(p.seen), tipPct: null,
+      id, name: p.name, o: p.o, paid: Boolean(p.paid), paidAmt: p.paidAmt ?? null, done: Boolean(p.done), seen: Boolean(p.seen), tipPct: p.tipPct ?? null,
     })),
   };
 }
