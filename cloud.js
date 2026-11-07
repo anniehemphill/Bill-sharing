@@ -31,8 +31,11 @@ export function toCloud(bill, settings) {
   const items = {};
   const claims = {};
   bill.items.forEach((it, o) => {
-    items[it.id] = { name: it.name, price: it.price, o };
-    if (it.claims.length) claims[it.id] = Object.fromEntries(it.claims.map((p) => [p, true]));
+    items[it.id] = { name: it.name, price: it.price, qty: it.qty || 1, o };
+    if ((it.qty || 1) > 1) {
+      const u = Object.entries(it.units || {}).filter(([, n]) => n > 0);
+      if (u.length) claims[it.id] = Object.fromEntries(u);
+    } else if (it.claims.length) claims[it.id] = Object.fromEntries(it.claims.map((p) => [p, true]));
   });
   const people = {};
   bill.people.forEach((p, o) => { people[p.id] = { name: p.name, o, paid: Boolean(p.paid), paidAmt: p.paidAmt ?? null, done: false, seen: false }; });
@@ -60,9 +63,15 @@ export function fromCloud(c) {
     currency: c.currency,
     tipPct: c.tipPct ?? 0,
     serviceIncluded: Boolean(c.serviceIncluded),
-    items: byOrder(c.items).map(([id, it]) => ({
-      id, name: it.name, price: it.price, qty: 1, o: it.o, claims: Object.keys((c.claims || {})[id] || {}),
-    })),
+    items: byOrder(c.items).map(([id, it]) => {
+      const raw = (c.claims || {})[id] || {};
+      // A claim is `true` (a tick) or a number of units picked.
+      const units = Object.fromEntries(Object.entries(raw).map(([p, v]) => [p, v === true ? 1 : Number(v) || 0]));
+      return {
+        id, name: it.name, price: it.price, qty: it.qty || 1, o: it.o,
+        claims: Object.keys(raw).filter((p) => p !== '_all'), units,
+      };
+    }),
     people: byOrder(c.people).map(([id, p]) => ({
       id, name: p.name, o: p.o, paid: Boolean(p.paid), paidAmt: p.paidAmt ?? null, done: Boolean(p.done), seen: Boolean(p.seen), tipPct: null,
     })),

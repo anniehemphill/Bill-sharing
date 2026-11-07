@@ -42,7 +42,7 @@ TOTAL              R320.50
 VISA               320.50`;
   const { items, detectedTotal } = parseReceipt(text);
   assert.deepEqual(items.map((i) => [i.name, i.price, i.qty]), [
-    ['2× Castle Lite', 7000, 2], ['Cheese Burger', 12950, 1], ['Greek Salad', 8900, 1], ['Coke Zero', 3200, 1],
+    ['Castle Lite', 7000, 2], ['Cheese Burger', 12950, 1], ['Greek Salad', 8900, 1], ['Coke Zero', 3200, 1],
   ]);
   assert.equal(detectedTotal, 32050);
   assert.deepEqual(splitUnits(items[0]).map((u) => [u.name, u.price]), [['Castle Lite', 3500], ['Castle Lite', 3500]]);
@@ -51,4 +51,26 @@ VISA               320.50`;
 test('toCents handles comma decimals', () => {
   assert.equal(toCents('12,50'), 1250);
   assert.equal(toCents('abc'), 0);
+});
+
+test('multi-quantity items: each person pays for the units they picked', () => {
+  const people = [{ id: 'a', name: 'A', tipPct: null }, { id: 'b', name: 'B', tipPct: null }, { id: 'c', name: 'C', tipPct: null }];
+  // 3 beers for R105: A had 2, B had 1
+  let r = computeSplit({ tipPct: 10, people, items: [{ id: 1, name: '3× Castle Lite', price: 10500, qty: 3, units: { a: 2, b: 1 } }] });
+  assert.deepEqual(r.people.map((p) => p.subtotal), [7000, 3500, 0]);
+  assert.equal(r.unclaimed, 0);
+  assert.equal(r.people[0].lines[0].units, 2);
+  // only 1 of 3 picked -> 2 left over, outstanding
+  r = computeSplit({ tipPct: 0, people, items: [{ id: 1, name: 'Beer', price: 10500, qty: 3, units: { c: 1 } }] });
+  assert.equal(r.people[2].subtotal, 3500);
+  assert.equal(r.unclaimed, 7000);
+  assert.equal(r.unclaimedItems[0].left, 2);
+  // leftover shared between everyone (_all)
+  r = computeSplit({ tipPct: 0, people, items: [{ id: 1, name: 'Beer', price: 10000, qty: 4, units: { a: 1, _all: 3 } }] });
+  assert.deepEqual(r.people.map((p) => p.subtotal), [2500 + 2500, 2500, 2500]);
+  assert.equal(r.unclaimed, 0);
+  // more picked than on the bill -> flagged, still adds up to the price
+  r = computeSplit({ tipPct: 0, people, items: [{ id: 1, name: 'Beer', price: 9000, qty: 2, units: { a: 2, b: 1 } }] });
+  assert.equal(r.overClaimed.length, 1);
+  assert.equal(r.people[0].subtotal + r.people[1].subtotal, 9000);
 });

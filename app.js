@@ -1,4 +1,4 @@
-import { computeSplit, fmt, toCents, parseReceipt, splitUnits } from './split.js';
+import { computeSplit, fmt, toCents, parseReceipt, unitsOf } from './split.js';
 import { parseVCards } from './contacts.js';
 import { cloudEnabled, cget, cput, cpatch, newCloudId, toCloud, fromCloud } from './cloud.js';
 
@@ -61,6 +61,15 @@ function intlNumber(phone) {
 }
 
 const people = () => state.bill?.people || [];
+
+// "Castle Lite ×2", "Nachos (÷3)", "Castle Lite (leftover ÷3)"
+function lineLabel(l, html = true) {
+  const extra = l.units != null
+    ? (l.splitWith > 1 ? ` (${l.units} left over, shared ÷${l.splitWith})` : ` ×${l.units}`)
+    : (l.splitWith > 1 ? ` (shared ÷${l.splitWith})` : '');
+  return html ? `${esc(l.name)}${extra ? ` <span class="muted">${esc(extra.trim())}</span>` : ''}` : `${l.name}${extra}`;
+}
+const unclaimedLabel = (i) => (i.left != null && (i.qty || 1) > 1 ? `${i.name} (${i.left} of ${i.qty} not picked)` : i.name);
 const personName = (id, list = people()) => list.find((p) => p.id === id)?.name || '?';
 
 // ---------- cloud sync ----------
@@ -102,8 +111,7 @@ function mergeHost(c) {
   const cb = fromCloud(c);
   const localP = new Map(b.people.map((p) => [p.id, p]));
   b.people = cb.people.map((p) => ({ ...localP.get(p.id), ...p }));
-  const qty = new Map(b.items.map((i) => [i.id, i.qty]));
-  b.items = cb.items.map((i) => ({ ...i, qty: qty.get(i.id) || 1 }));
+  b.items = cb.items;
   b.place = cb.place;
   b.tipPct = cb.tipPct;
   b.serviceIncluded = cb.serviceIncluded;
@@ -176,7 +184,7 @@ function groupText() {
 function requestText(id) {
   const b = state.bill;
   const p = computeSplit(b).people.find((x) => x.id === id);
-  const lines = p.lines.map((l) => `• ${l.name}${l.splitWith > 1 ? ` (shared ÷${l.splitWith})` : ''}: ${money(l.share)}`).join('\n');
+  const lines = p.lines.map((l) => `• ${lineLabel(l, false)}: ${money(l.share)}`).join('\n');
   const link = b.cloudId ? `\n\nOpen your share: ${inviteLink(id)}` : '';
   return `Hi ${p.name}, here's your share${b.place ? ` at ${b.place}` : ''}:\n${lines}\nFood: ${money(p.subtotal)}\nTip (${p.tipPct}%): ${money(p.tip)}\nPay the waiter: ${money(p.total)}${link}`;
 }
@@ -209,15 +217,18 @@ function coverageCard(bill, res, { shareBtn = false } = {}) {
   const payLine = !unpaid.length && !res.unclaimed
     ? '<div class="paid">✓ Everyone has paid</div>'
     : `<div>Paid: ${paid.length} of ${bill.people.length} people · <strong>${money(stillToPay)}</strong> still to pay${unpaid.length ? ` (${esc(unpaid.map((p) => p.name).join(', '))})` : ''}</div>`;
+  const over = res.overClaimed.length
+    ? `<div class="banner"><strong>Too many picked:</strong> ${esc(res.overClaimed.map((i) => `${i.name}: ${i.taken} picked but only ${i.qty} on the bill`).join('; '))}. Someone needs to lower theirs.</div>`
+    : '';
   if (res.unclaimed) {
-    return `<div class="banner">
+    return over + `<div class="banner">
       <strong>Not covered yet: ${money(res.unclaimed)} not ticked by anyone</strong>
-      <div>${esc(res.unclaimedItems.map((i) => i.name).join(', '))}</div>
+      <div>${esc(res.unclaimedItems.map(unclaimedLabel).join(', '))}</div>
       <div style="margin-top:6px">${payLine}</div>
       ${shareBtn ? '<button class="btn small" style="margin-top:8px" data-act="share-rest">Split unticked items equally between everyone</button>' : ''}
     </div>`;
   }
-  return `<div class="banner ok"><strong>✓ Whole bill covered</strong> — every item is ticked by someone.<div style="margin-top:6px">${payLine}</div></div>`;
+  return over + `<div class="banner ok"><strong>✓ Whole bill covered</strong> — every item is ticked by someone.<div style="margin-top:6px">${payLine}</div></div>`;
 }
 
 function statusOf(p, total) {
@@ -305,7 +316,7 @@ function viewItems() {
     <li>
       <input class="grow" data-edit="name" data-id="${it.id}" value="${esc(it.name)}" aria-label="Item name">
       <input style="width:96px" inputmode="decimal" data-edit="price" data-id="${it.id}" value="${cents2str(it.price)}" aria-label="Price">
-      ${it.qty > 1 ? `<button class="btn small" data-act="units" data-id="${it.id}" title="Split into ${it.qty} separate items">÷${it.qty}</button>` : ''}
+      <input style="width:52px;text-align:center" inputmode="numeric" data-edit="qty" data-id="${it.id}" value="${it.qty || 1}" aria-label="Quantity" title="Quantity">
       <button class="btn small danger" data-act="del-item" data-id="${it.id}" aria-label="Remove">✕</button>
     </li>`).join('');
   return `
@@ -325,7 +336,9 @@ function viewItems() {
     ${b.detectedTotal != null && diff !== 0 ? `<div class="banner">Bill total on the slip is ${money(b.detectedTotal)}, items below add up to ${money(total)} (${diff > 0 ? 'missing' : 'extra'} ${money(Math.abs(diff))}). Check for a missed or misread line.</div>` : ''}
     <div class="card">
       <div class="row between"><strong>Items (${b.items.length})</strong><span class="amt">${money(total)}</span></div>
-      ${rows ? `<ul class="list">${rows}</ul>` : '<p class="empty">No items yet. Scan the bill or add them below.</p>'}
+      ${rows ? `<div class="row muted" style="font-size:12px;margin-top:8px"><span class="grow">Item</span><span style="width:96px">Line total</span><span style="width:52px;text-align:center">Qty</span><span style="width:44px"></span></div>
+      <ul class="list">${rows}</ul>
+      <p class="muted">Set Qty above 1 when a line is for several (e.g. 3 beers), so each person can pick how many they had.</p>` : '<p class="empty">No items yet. Scan the bill or add them below.</p>'}
       <form id="add-item" class="row" style="margin-top:10px">
         <input class="grow" name="name" placeholder="Item" required>
         <input style="width:96px" name="price" inputmode="decimal" placeholder="0.00" required>
@@ -366,6 +379,23 @@ function viewPeople() {
 
 function claimList(bill, pid, act) {
   return bill.items.map((it) => {
+    const qty = it.qty || 1;
+    if (qty > 1) {
+      const u = unitsOf(it);
+      const mineN = u[pid] || 0;
+      const taken = Object.entries(u).reduce((a, [, n]) => a + (n > 0 ? n : 0), 0);
+      const who = Object.entries(u).filter(([, n]) => n > 0)
+        .map(([id, n]) => (id === '_all' ? `${n} shared by everyone` : `${personName(id, bill.people)} ×${n}`));
+      const canAdd = taken < qty;
+      return `<li class="item ${mineN ? 'mine' : ''}">
+        <div class="grow"><div class="name">${esc(it.name)}</div>
+          <div class="who">${money(Math.round(it.price / qty))} each · ${taken} of ${qty} picked${who.length ? `: ${esc(who.join(', '))}` : ''}</div></div>
+        <div class="row" style="gap:6px;flex:none">
+          <button class="btn small" data-act="${act}-u" data-id="${it.id}" data-d="-1" ${mineN ? '' : 'disabled'} aria-label="One less">−</button>
+          <span class="amt" style="min-width:18px;text-align:center;font-weight:700">${mineN}</span>
+          <button class="btn small ${canAdd ? 'primary' : ''}" data-act="${act}-u" data-id="${it.id}" data-d="1" ${canAdd ? '' : 'disabled'} aria-label="One more">+</button>
+        </div></li>`;
+    }
     const has = it.claims.includes(pid);
     const who = it.claims.map((id) => personName(id, bill.people));
     return `<li class="item ${has ? 'mine' : ''}" data-act="${act}" data-id="${it.id}">
@@ -374,6 +404,19 @@ function claimList(bill, pid, act) {
         <div class="who">${who.length ? (who.length > 1 ? `Shared: ${esc(who.join(', '))}` : esc(who[0])) : 'Not claimed yet'}</div></div>
       <span class="amt">${money(it.price)}</span></li>`;
   }).join('');
+}
+
+// Change how many units of a multi-quantity item `pid` picked. Returns the claim update.
+function stepUnits(it, pid, d) {
+  const u = { ...unitsOf(it) };
+  const taken = Object.values(u).reduce((a, n) => a + (n > 0 ? n : 0), 0);
+  const cur = u[pid] || 0;
+  const next = d > 0 ? (taken < (it.qty || 1) ? cur + 1 : cur) : Math.max(0, cur - 1);
+  if (next === cur) return null;
+  if (next) u[pid] = next; else delete u[pid];
+  it.units = u;
+  it.claims = Object.keys(u).filter((k) => k !== '_all');
+  return { [`claims/${it.id}/${pid}`]: next || null };
 }
 
 function viewInvites() {
@@ -430,7 +473,7 @@ function viewPay() {
         <span class="amt total-big">${money(p.total)}</span>
       </div>
       <details ${open ? 'open' : ''} data-person="${p.id}"><summary>Breakdown</summary>
-        <ul class="list">${p.lines.map((l) => `<li><span class="grow name">${esc(l.name)}${l.splitWith > 1 ? ` <span class="muted">(÷${l.splitWith})</span>` : ''}</span><span class="amt">${money(l.share)}</span></li>`).join('') || '<li class="muted">Nothing claimed</li>'}</ul>
+        <ul class="list">${p.lines.map((l) => `<li><span class="grow name">${lineLabel(l)}</span><span class="amt">${money(l.share)}</span></li>`).join('') || '<li class="muted">Nothing claimed</li>'}</ul>
       </details>
       <div class="btn-row" style="margin-top:10px">
         ${isMe ? '' : `<button class="btn small" data-act="wa" data-id="${p.id}">WhatsApp</button>
@@ -511,7 +554,7 @@ function viewGuest(r) {
   if (!me.done) {
     return `
       <div class="card"><strong>Hi ${esc(me.name)} 👋</strong>
-        <p class="muted">${esc(bill.host)} is splitting the bill${bill.place ? ` at ${esc(bill.place)}` : ''}. Tap everything you had. If you shared something, tap it too — it's split between everyone who taps it.</p></div>
+        <p class="muted">${esc(bill.host)} is splitting the bill${bill.place ? ` at ${esc(bill.place)}` : ''}. Tap everything you had. If you shared something, tap it too — it's split between everyone who taps it. For items with + and −, tap + once for each one you had.</p></div>
       ${coverageCard(bill, res)}
       <div class="card"><ul class="list">${claimList(bill, me.id, 'gclaim')}</ul></div>
       ${totals}
@@ -530,7 +573,7 @@ function viewGuest(r) {
            <button class="btn block ${me.paid ? '' : 'primary'}" data-act="gpaid">${me.paid ? '<span class="paid">✓ You\'ve paid</span> — tap to undo' : "I've paid"}</button>`}
     </div>
     <details class="card"><summary>What you had</summary>
-      <ul class="list">${mine.lines.map((l) => `<li><span class="grow name">${esc(l.name)}${l.splitWith > 1 ? ` <span class="muted">(÷${l.splitWith})</span>` : ''}</span><span class="amt">${money(l.share)}</span></li>`).join('')}</ul>
+      <ul class="list">${mine.lines.map((l) => `<li><span class="grow name">${lineLabel(l)}</span><span class="amt">${money(l.share)}</span></li>`).join('')}</ul>
     </details>
     <button class="btn small block" data-act="gundone">Change my items</button>
     ${home}`;
@@ -632,7 +675,7 @@ async function prepImage(file) {
   return c;
 }
 
-const itemDoc = (it, o) => ({ name: it.name, price: it.price, o });
+const itemDoc = (it, o) => ({ name: it.name, price: it.price, qty: it.qty || 1, o });
 
 async function scan(file) {
   ocr = { pct: 0, status: 'Loading scanner…' };
@@ -650,7 +693,7 @@ async function scan(file) {
     const { items, detectedTotal } = parseReceipt(data.text);
     const b = state.bill;
     const start = b.items.length;
-    const added = items.map((it) => ({ ...it, id: uid(), claims: [] }));
+    const added = items.map((it) => ({ ...it, id: uid(), claims: [], units: {} }));
     b.items.push(...added);
     if (detectedTotal != null) b.detectedTotal = detectedTotal;
     sync(Object.fromEntries(added.map((it, k) => [`items/${it.id}`, itemDoc(it, start + k)])));
@@ -715,15 +758,6 @@ document.addEventListener('click', async (e) => {
       b.items = []; b.detectedTotal = null;
       sync({ items: null, claims: null });
       break;
-    case 'units': {
-      const at = b.items.findIndex((i) => i.id === id);
-      const units = splitUnits(b.items[at]).map((u) => ({ ...u, id: uid(), claims: [] }));
-      b.items.splice(at, 1, ...units);
-      const up = { [`items/${id}`]: null, [`claims/${id}`]: null };
-      b.items.forEach((it, o) => { up[`items/${it.id}`] = itemDoc(it, o); });
-      sync(up);
-      break;
-    }
     case 'toggle-friend': {
       const f = state.friends.find((x) => x.id === id);
       const existing = b.people.find((p) => p.friendId === id);
@@ -740,11 +774,25 @@ document.addEventListener('click', async (e) => {
       sync({ [`claims/${id}/${claimer}`]: has ? null : true });
       break;
     }
+    case 'claim-u': {
+      const up = stepUnits(b.items.find((i) => i.id === id), claimer, Number(el.dataset.d));
+      if (!up) return;
+      sync(up);
+      break;
+    }
     case 'share-rest': {
       const all = b.people.map((p) => p.id);
       const up = {};
       b.items.forEach((it) => {
-        if (!it.claims.length) { it.claims = [...all]; up[`claims/${it.id}`] = Object.fromEntries(all.map((p) => [p, true])); }
+        if ((it.qty || 1) > 1) {
+          const u = { ...unitsOf(it) };
+          const taken = Object.values(u).reduce((a, n) => a + (n > 0 ? n : 0), 0);
+          const left = it.qty - taken;
+          if (left > 0) { u._all = (u._all || 0) + left; it.units = u; up[`claims/${it.id}/_all`] = u._all; }
+        } else if (!it.claims.length) {
+          it.claims = [...all];
+          up[`claims/${it.id}`] = Object.fromEntries(all.map((p) => [p, true]));
+        }
       });
       sync(up);
       break;
@@ -808,6 +856,12 @@ document.addEventListener('click', async (e) => {
       guestLoaded(route());
       break;
     }
+    case 'gclaim-u': {
+      const up = stepUnits(gb.bill.items.find((i) => i.id === id), route().pid, Number(el.dataset.d));
+      if (!up) return;
+      syncGuest(up);
+      break;
+    }
     case 'gclaim': {
       const r = route();
       const it = gb.bill.items.find((i) => i.id === id);
@@ -845,7 +899,7 @@ document.addEventListener('submit', (e) => {
   if (f.id === 'add-item') {
     const price = toCents(data.price);
     if (!name || !price) return toast('Enter a name and price');
-    const it = { id: uid(), name, price, qty: 1, claims: [] };
+    const it = { id: uid(), name, price, qty: 1, claims: [], units: {} };
     state.bill.items.push(it);
     sync({ [`items/${it.id}`]: itemDoc(it, state.bill.items.length - 1) });
   } else if (f.id === 'add-guest') {
@@ -902,6 +956,15 @@ document.addEventListener('change', (e) => {
     if (kind === 'name') it.name = el.value.trim() || it.name;
     else it.price = toCents(el.value);
     sync({ [`items/${it.id}/${kind}`]: it[kind] });
+  }
+  if (kind === 'qty') {
+    const it = b.items.find((i) => i.id === el.dataset.id);
+    const q = Math.min(99, Math.max(1, parseInt(el.value, 10) || 1));
+    if (q !== (it.qty || 1)) {
+      // Changing quantity resets who picked it, since the old picks may no longer fit.
+      it.qty = q; it.claims = []; it.units = {};
+      sync({ [`items/${it.id}/qty`]: q, [`claims/${it.id}`]: null });
+    }
   }
   save();
   render();

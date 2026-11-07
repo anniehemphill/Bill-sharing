@@ -28,6 +28,18 @@ export function apportion(total, weights) {
 // bill = { items: [{id, name, price (cents), claims: [personId]}],
 //          people: [{id, name, tipPct: number|null}], tipPct }
 // Returns per-person breakdown plus bill-level checks.
+// Units each person picked on a multi-quantity item: {personId: n, _all: n}.
+// `_all` = units split equally between everyone. Plain ticks count as 1 unit.
+export function unitsOf(item) {
+  if (item.units) return item.units;
+  return Object.fromEntries((item.claims || []).map((id) => [id, 1]));
+}
+
+// bill = { items: [{id, name, price (cents), qty, claims: [personId], units?: {personId: n}}],
+//          people: [{id, name, tipPct: number|null}], tipPct }
+// qty 1 items: everyone who ticks it shares it equally.
+// qty > 1 items: each person pays for the number of units they picked.
+// Returns per-person breakdown plus bill-level checks.
 export function computeSplit(bill) {
   const people = bill.people;
   const idx = new Map(people.map((p, i) => [p.id, i]));
@@ -35,8 +47,44 @@ export function computeSplit(bill) {
   const lines = people.map(() => []);
   let unclaimed = 0;
   const unclaimedItems = [];
+  const overClaimed = [];
+
+  const give = (id, share, line) => {
+    const i = idx.get(id);
+    sub[i] += share;
+    lines[i].push({ ...line, share });
+  };
 
   for (const item of bill.items) {
+    const qty = item.qty || 1;
+    if (qty > 1) {
+      const u = unitsOf(item);
+      const ids = Object.keys(u).filter((id) => idx.has(id) && u[id] > 0);
+      const counts = ids.map((id) => u[id]);
+      const all = people.length ? Math.max(0, u._all || 0) : 0;
+      const taken = counts.reduce((a, b) => a + b, 0) + all;
+      if (!taken) {
+        unclaimed += item.price;
+        unclaimedItems.push({ ...item, left: qty });
+        continue;
+      }
+      if (taken > qty) overClaimed.push({ ...item, taken });
+      const left = Math.max(0, qty - taken);
+      const weights = [...counts, ...(all ? [all] : []), ...(left ? [left] : [])];
+      const parts = apportion(item.price, weights);
+      ids.forEach((id, k) => give(id, parts[k], { name: item.name, units: counts[k], of: qty, splitWith: 1 }));
+      if (all) {
+        const allPart = parts[ids.length];
+        const each = apportion(allPart, people.map(() => 1));
+        people.forEach((p, k) => give(p.id, each[k], { name: item.name, units: all, of: qty, splitWith: people.length }));
+      }
+      if (left) {
+        const leftPart = parts.at(-1);
+        unclaimed += leftPart;
+        unclaimedItems.push({ ...item, price: leftPart, left });
+      }
+      continue;
+    }
     const claimants = (item.claims || []).filter((id) => idx.has(id));
     if (!claimants.length) {
       unclaimed += item.price;
@@ -44,15 +92,7 @@ export function computeSplit(bill) {
       continue;
     }
     const parts = apportion(item.price, claimants.map(() => 1));
-    claimants.forEach((id, k) => {
-      const i = idx.get(id);
-      sub[i] += parts[k];
-      lines[i].push({
-        name: item.name,
-        share: parts[k],
-        splitWith: claimants.length,
-      });
-    });
+    claimants.forEach((id, k) => give(id, parts[k], { name: item.name, splitWith: claimants.length }));
   }
 
   const result = people.map((p, i) => {
@@ -67,6 +107,7 @@ export function computeSplit(bill) {
     itemsTotal,
     unclaimed,
     unclaimedItems,
+    overClaimed,
     tipTotal: result.reduce((a, r) => a + r.tip, 0),
     grandTotal: result.reduce((a, r) => a + r.total, 0) + unclaimed,
   };
@@ -106,7 +147,7 @@ export function parseReceipt(text) {
     if (q) { qty = parseInt(q[1], 10); name = q[2]; }
     name = name.replace(/^[^A-Za-z0-9]+/, '').trim();
     if (name.length < 2) continue;
-    items.push({ name: qty > 1 ? `${qty}× ${name}` : name, price, qty });
+    items.push({ name, price, qty });
   }
   return { items, detectedTotal };
 }
